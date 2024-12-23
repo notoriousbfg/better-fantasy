@@ -17,6 +17,7 @@ const (
 )
 
 type WriteData interface {
+	MarkImported(gameweekID int) error
 	StorePlayer(player models.Player) error
 	StorePlayerType(playerType models.PlayerType) error
 	StoreTeam(team models.Team) error
@@ -28,53 +29,10 @@ type ReadData interface {
 	GetPlayer(playerID models.PlayerID) (models.Player, error)
 }
 
-func StoreData(data *api.Data, gameweekInt int, nuke bool, dumpData bool) error {
-	store := DataStore{
+func NewStore(gameweekInt int) DataStore {
+	return DataStore{
 		GameweekID: gameweekInt,
 	}
-	store.Setup(nuke)
-
-	for _, playerType := range data.PlayerTypes {
-		if err := store.StorePlayerType(playerType); err != nil {
-			return err
-		}
-	}
-
-	for _, team := range data.Teams {
-		if err := store.StoreTeam(*team); err != nil {
-			return err
-		}
-	}
-
-	for _, player := range data.Players {
-		if err := store.StorePlayer(player); err != nil {
-			return err
-		}
-	}
-
-	for _, gameweek := range data.Gameweeks {
-		if err := store.StoreGameweek(gameweek); err != nil {
-			return err
-		}
-	}
-
-	for _, fixture := range data.Fixtures {
-		if fixture.Gameweek.ID != models.GameweekID(store.GameweekID) {
-			continue
-		}
-
-		if err := store.StoreFixture(*fixture); err != nil {
-			return err
-		}
-	}
-
-	if dumpData {
-		if err := store.Dump(); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 type DataStore struct {
@@ -142,10 +100,20 @@ func (p *DataStore) Setup(nukeDatabase bool) error {
 			DROP TABLE IF EXISTS teams;
 			DROP TABLE IF EXISTS gameweeks;
 			DROP TABLE IF EXISTS fixtures;
+			DROP TABLE IF EXISTS imports;
 		`)
 		if err != nil {
 			return err
 		}
+	}
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS imports (
+		gameweek_id INT PRIMARY KEY,
+		imported BOOLEAN NOT NULL
+	)`)
+
+	if err != nil {
+		return err
 	}
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS player_types (
@@ -235,6 +203,61 @@ func (p *DataStore) Setup(nukeDatabase bool) error {
 	if err != nil {
 		return err
 	}
+
+	return nil
+}
+
+func (p *DataStore) StoreData(data *api.Data, dumpData bool) error {
+	var nuke bool
+
+	// ensures dump only contains data for specific gw
+	if dumpData {
+		nuke = true
+	}
+
+	p.Setup(nuke)
+
+	for _, playerType := range data.PlayerTypes {
+		if err := p.StorePlayerType(playerType); err != nil {
+			return err
+		}
+	}
+
+	for _, team := range data.Teams {
+		if err := p.StoreTeam(*team); err != nil {
+			return err
+		}
+	}
+
+	for _, player := range data.Players {
+		if err := p.StorePlayer(player); err != nil {
+			return err
+		}
+	}
+
+	for _, gameweek := range data.Gameweeks {
+		if err := p.StoreGameweek(gameweek); err != nil {
+			return err
+		}
+	}
+
+	for _, fixture := range data.Fixtures {
+		if fixture.Gameweek.ID != models.GameweekID(p.GameweekID) {
+			continue
+		}
+
+		if err := p.StoreFixture(*fixture); err != nil {
+			return err
+		}
+	}
+
+	if dumpData {
+		if err := p.Dump(); err != nil {
+			return err
+		}
+	}
+
+	p.MarkImported(p.GameweekID)
 
 	return nil
 }
@@ -342,6 +365,57 @@ func (p *DataStore) StoreFixture(fixture models.Fixture) error {
 	) VALUES (?, ?, ?, ?, ?, ?, ?)`
 
 	_, err = db.Exec(query, fixture.ID, fixture.Gameweek.ID, fixture.HomeTeam.ID, fixture.AwayTeam.ID, fixture.HomeTeamDifficulty, fixture.AwayTeamDifficulty, fixture.DifficultyMajority)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (p *DataStore) HasImported() (bool, error) {
+	db, err := p.Connect()
+	if err != nil {
+		return false, err
+	}
+	defer p.Close()
+
+	query := `SELECT imported FROM imports WHERE gameweek_id = ?`
+
+	row := db.QueryRow(query, p.GameweekID)
+
+	var rowStruct struct {
+		Imported bool
+	}
+	err = row.Scan(
+		&rowStruct.Imported,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return rowStruct.Imported, nil
+}
+
+func (p *DataStore) MarkImported(gameweekID int) error {
+	db, err := p.Connect()
+	if err != nil {
+		return err
+	}
+	defer p.Close()
+
+	query := `
+		INSERT OR IGNORE INTO imports (
+			gameweek_id,
+			imported
+		) VALUES (?, ?)
+	`
+
+	_, err = db.Exec(query, gameweekID, true)
 
 	if err != nil {
 		return err

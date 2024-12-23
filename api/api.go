@@ -386,9 +386,6 @@ func FetchData() (*Data, error) {
 
 	fixtures := make([]*models.Fixture, 0)
 	for _, apiFixture := range apiFixtures {
-		if models.GameweekID(apiFixture.EventID) != currentGameweekID {
-			continue
-		}
 		homeTeam := teamsByID[models.TeamID(apiFixture.HomeTeamID)]
 		awayTeam := teamsByID[models.TeamID(apiFixture.AwayTeamID)]
 

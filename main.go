@@ -8,19 +8,24 @@ import (
 
 func main() {
 	gameWeekInt := flag.Int("gameweek", 0, "for specifying the gameweek")
-	save := flag.Bool("save", false, "for storing data")
 	dump := flag.Bool("dump", false, "for saving data to file")
-	nuke := flag.Bool("nuke", false, "nuke the database")
 	flag.Parse()
 
-	data, err := api.FetchData()
+	store := store.NewStore(*gameWeekInt)
+
+	hasImported, err := store.HasImported()
 	if err != nil {
 		panic(err)
 	}
 
-	if *save {
+	if !hasImported {
+		data, err := api.FetchData()
+		if err != nil {
+			panic(err)
+		}
+
 		defer func() {
-			err = store.StoreData(data, *gameWeekInt, *nuke, *dump)
+			err = store.StoreData(data, *dump)
 			if err != nil {
 				panic(err)
 			}
