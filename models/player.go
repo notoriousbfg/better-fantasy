@@ -1,7 +1,5 @@
 package models
 
-import "better-fantasy/printer"
-
 type PlayerTypeID int
 
 type PlayerType struct {
@@ -68,16 +66,6 @@ func (p *Player) PointsOverCost() float32 {
 		return 0
 	}
 	return float32(p.TotalPoints) / p.RawCost
-}
-
-func (p *Player) ToListItem() printer.ListItem {
-	return printer.ListItem{
-		Format: "%s (%s)",
-		Values: []interface{}{
-			p.Name,
-			p.Cost,
-		},
-	}
 }
 
 type PlayerFixture struct {

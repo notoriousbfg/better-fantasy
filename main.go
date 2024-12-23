@@ -8,11 +8,10 @@ import (
 )
 
 func main() {
-	gameWeekInt := flag.Int("gameweek", 0, "for specifying the gameweek")
 	dump := flag.Bool("dump", false, "for saving data to file")
 	flag.Parse()
 
-	store := store.NewStore(*gameWeekInt)
+	store := store.NewStore()
 
 	hasImported, err := store.HasImported()
 	if err != nil {
@@ -31,7 +30,7 @@ func main() {
 		}
 	}
 
-	insights := insights.NewInsights(*gameWeekInt, &store)
+	insights := insights.NewInsights(&store)
 	err = insights.Analyse()
 	if err != nil {
 		panic(err)

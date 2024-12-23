@@ -29,16 +29,13 @@ type ReadData interface {
 	GetPlayer(playerID models.PlayerID) (models.Player, error)
 }
 
-func NewStore(gameweekInt int) DataStore {
-	store := DataStore{
-		GameweekID: gameweekInt,
-	}
+func NewStore() DataStore {
+	store := DataStore{}
 	store.Setup()
 	return store
 }
 
 type DataStore struct {
-	GameweekID int
 	Connection *sql.DB
 }
 
@@ -78,7 +75,7 @@ func (p *DataStore) Dump() error {
 	}
 	defer p.Close()
 
-	exportDir := fmt.Sprintf("./exports/gw_%d", p.GameweekID)
+	exportDir := fmt.Sprintf("./exports/gw_%d", p.CurrentGameweek())
 	err = os.Mkdir(exportDir, os.ModePerm)
 	if err != nil {
 		// end silently if dir already exists
@@ -134,9 +131,7 @@ func (p *DataStore) Setup() error {
 	}
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS players (
-		gameweek_player_id VARCHAR PRIMARY KEY,
-		id INTEGER,
-		gameweek_id INTEGER,
+		id INTEGER PRIMARY KEY,
 		name TEXT,
 		form REAL,
 		points_per_game REAL,
@@ -210,6 +205,11 @@ func (p *DataStore) Setup() error {
 	return nil
 }
 
+func (p *DataStore) CurrentGameweek() int {
+	// TODO
+	return 1
+}
+
 func (p *DataStore) StoreData(data *api.Data, dumpData bool) error {
 	// ensures dump only contains data for specific gw
 	if dumpData {
@@ -242,7 +242,7 @@ func (p *DataStore) StoreData(data *api.Data, dumpData bool) error {
 
 	for _, fixture := range data.Fixtures {
 		// ensures we see only fixtures for specific gameweek
-		if dumpData && (fixture.Gameweek.ID != models.GameweekID(p.GameweekID)) {
+		if dumpData && (fixture.Gameweek.ID != models.GameweekID(p.CurrentGameweek())) {
 			continue
 		}
 
@@ -257,7 +257,7 @@ func (p *DataStore) StoreData(data *api.Data, dumpData bool) error {
 		}
 	}
 
-	p.MarkImported(p.GameweekID)
+	p.MarkImported(p.CurrentGameweek())
 
 	return nil
 }
@@ -270,11 +270,11 @@ func (p *DataStore) StorePlayer(player models.Player) error {
 	defer p.Close()
 
 	query := `
-		INSERT OR IGNORE INTO players (gameweek_player_id, id, gameweek_id, name, form, points_per_game, total_points, cost, raw_cost, team_id, type_id, minutes, goals, assists, conceded, clean_sheets, yellow_cards, red_cards, bonus, starts, average_starts, matches_played, ict_index, ict_index_rank, most_captained, picked_percentage)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT OR IGNORE INTO players (id, name, form, points_per_game, total_points, cost, raw_cost, team_id, type_id, minutes, goals, assists, conceded, clean_sheets, yellow_cards, red_cards, bonus, starts, average_starts, matches_played, ict_index, ict_index_rank, most_captained, picked_percentage)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
-	_, err = db.Exec(query, fmt.Sprintf("%d_%d", p.GameweekID, player.ID), player.ID, p.GameweekID, player.Name, player.Form, player.PointsPerGame, player.TotalPoints, player.Cost, player.RawCost, player.Team.ID, player.Type.ID, player.Stats.Minutes, player.Stats.Goals, player.Stats.Assists, player.Stats.Conceded, player.Stats.CleanSheets, player.Stats.YellowCards, player.Stats.RedCards, player.Stats.Bonus, player.Stats.Starts, player.Stats.AverageStarts, player.Stats.MatchesPlayed, player.Stats.ICTIndex, player.Stats.ICTIndexRank, player.MostCaptained, player.PickedPercentage)
+	_, err = db.Exec(query, player.ID, player.Name, player.Form, player.PointsPerGame, player.TotalPoints, player.Cost, player.RawCost, player.Team.ID, player.Type.ID, player.Stats.Minutes, player.Stats.Goals, player.Stats.Assists, player.Stats.Conceded, player.Stats.CleanSheets, player.Stats.YellowCards, player.Stats.RedCards, player.Stats.Bonus, player.Stats.Starts, player.Stats.AverageStarts, player.Stats.MatchesPlayed, player.Stats.ICTIndex, player.Stats.ICTIndexRank, player.MostCaptained, player.PickedPercentage)
 
 	if err != nil {
 		return err
@@ -382,7 +382,7 @@ func (p *DataStore) HasImported() (bool, error) {
 
 	query := `SELECT imported FROM imports WHERE gameweek_id = ?`
 
-	row := db.QueryRow(query, p.GameweekID)
+	row := db.QueryRow(query, p.CurrentGameweek())
 
 	var rowStruct struct {
 		Imported bool
@@ -454,7 +454,7 @@ func (p *DataStore) PlayersForGameweek(gameweek int) ([]models.Player, error) {
 	}
 	defer p.Close()
 
-	rows, err := db.Query(fmt.Sprintf("SELECT id, gameweek_id, name, form, points_per_game, total_points, cost, raw_cost, team_id, type_id, minutes, goals, assists, conceded, clean_sheets, yellow_cards, red_cards, bonus, starts, average_starts, picked_percentage FROM `players` WHERE `gameweek_id` = %d", gameweek))
+	rows, err := db.Query("SELECT id, name, form, points_per_game, total_points, cost, raw_cost, team_id, type_id, minutes, goals, assists, conceded, clean_sheets, yellow_cards, red_cards, bonus, starts, average_starts, picked_percentage FROM `players`")
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +464,6 @@ func (p *DataStore) PlayersForGameweek(gameweek int) ([]models.Player, error) {
 	for rows.Next() {
 		type player struct {
 			ID               int
-			GameweekID       int
 			Name             string
 			Form             float32
 			PointsPerGame    float32
@@ -488,7 +487,6 @@ func (p *DataStore) PlayersForGameweek(gameweek int) ([]models.Player, error) {
 		var playerRow player
 		err := rows.Scan(
 			&playerRow.ID,
-			&playerRow.GameweekID,
 			&playerRow.Name,
 			&playerRow.Form,
 			&playerRow.PointsPerGame,
@@ -520,6 +518,9 @@ func (p *DataStore) PlayersForGameweek(gameweek int) ([]models.Player, error) {
 			TotalPoints:   playerRow.TotalPoints,
 			Cost:          playerRow.Cost,
 			RawCost:       playerRow.RawCost,
+			Stats: models.PlayerStats{
+				Bonus: playerRow.Bonus,
+			},
 		})
 	}
 

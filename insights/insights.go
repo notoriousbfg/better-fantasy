@@ -13,9 +13,9 @@ type Insights struct {
 	Store    *store.DataStore
 }
 
-func NewInsights(gameweek int, store *store.DataStore) *Insights {
+func NewInsights(store *store.DataStore) *Insights {
 	return &Insights{
-		Gameweek: gameweek,
+		Gameweek: store.CurrentGameweek(),
 		Store:    store,
 	}
 }
@@ -32,34 +32,73 @@ func (i *Insights) Analyse() error {
 		return err
 	}
 	bestFormValuePlayers := sortPlayersByFormValueDesc(playersForGameweek)[:10]
-	printPlayerList("The best value players (form):", bestFormValuePlayers)
+	printPlayerCostsList("The best value players (form):", bestFormValuePlayers)
 	fmt.Println()
 	bestPointsValuePlayers := sortPlayersByPointsValueDesc(playersForGameweek)[:10]
-	printPlayerList("The best value players (total):", bestPointsValuePlayers)
+	printPlayerCostsList("The best value players (total):", bestPointsValuePlayers)
+	fmt.Println()
+	highestBonus := sortPlayersByBonus(playersForGameweek)[:10]
+	printPlayerBonusList("Players with the highest numbers of bonus points:", highestBonus)
 	return nil
 }
 
 func sortPlayersByFormValueDesc(players []models.Player) []models.Player {
-	sort.Slice(players, func(i, j int) bool {
-		return players[i].FormOverCost() > players[j].FormOverCost()
+	tmp := make([]models.Player, len(players))
+	copy(tmp, players)
+	sort.Slice(tmp, func(i, j int) bool {
+		return tmp[i].FormOverCost() > tmp[j].FormOverCost()
 	})
-	return players
+	return tmp
 }
 
 func sortPlayersByPointsValueDesc(players []models.Player) []models.Player {
-	sort.Slice(players, func(i, j int) bool {
-		return players[i].PointsOverCost() > players[j].PointsOverCost()
+	tmp := make([]models.Player, len(players))
+	copy(tmp, players)
+	sort.Slice(tmp, func(i, j int) bool {
+		return tmp[i].PointsOverCost() > tmp[j].PointsOverCost()
 	})
-	return players
+	return tmp
 }
 
-func printPlayerList(title string, players []models.Player) {
+func sortPlayersByBonus(players []models.Player) []models.Player {
+	tmp := make([]models.Player, len(players))
+	copy(tmp, players)
+	sort.Slice(tmp, func(i, j int) bool {
+		return tmp[i].Stats.Bonus > tmp[j].Stats.Bonus
+	})
+	return tmp
+}
+
+func printPlayerCostsList(title string, players []models.Player) {
 	list := printer.List{
 		Title: title,
 		Items: make([]printer.ListItem, 0),
 	}
 	for _, player := range players {
-		list.Items = append(list.Items, player.ToListItem())
+		list.Items = append(list.Items, printer.ListItem{
+			Format: "%s (%s)",
+			Values: []interface{}{
+				player.Name,
+				player.Cost,
+			},
+		})
+	}
+	printer.PrintList(list)
+}
+
+func printPlayerBonusList(title string, players []models.Player) {
+	list := printer.List{
+		Title: title,
+		Items: make([]printer.ListItem, 0),
+	}
+	for _, player := range players {
+		list.Items = append(list.Items, printer.ListItem{
+			Format: "%s (%d)",
+			Values: []interface{}{
+				player.Name,
+				player.Stats.Bonus,
+			},
+		})
 	}
 	printer.PrintList(list)
 }
