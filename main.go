@@ -2,6 +2,7 @@ package main
 
 import (
 	"better-fantasy/api"
+	"better-fantasy/insights"
 	"better-fantasy/store"
 	"flag"
 )
@@ -24,11 +25,15 @@ func main() {
 			panic(err)
 		}
 
-		defer func() {
-			err = store.StoreData(data, *dump)
-			if err != nil {
-				panic(err)
-			}
-		}()
+		err = store.StoreData(data, *dump)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	insights := insights.NewInsights(*gameWeekInt, &store)
+	err = insights.Analyse()
+	if err != nil {
+		panic(err)
 	}
 }

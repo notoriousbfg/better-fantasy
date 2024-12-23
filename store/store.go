@@ -30,9 +30,11 @@ type ReadData interface {
 }
 
 func NewStore(gameweekInt int) DataStore {
-	return DataStore{
+	store := DataStore{
 		GameweekID: gameweekInt,
 	}
+	store.Setup()
+	return store
 }
 
 type DataStore struct {
@@ -51,6 +53,21 @@ func (p *DataStore) Connect() (*sql.DB, error) {
 
 func (p *DataStore) Close() error {
 	return p.Connection.Close()
+}
+
+func (p *DataStore) Nuke() error {
+	_, err := p.Connection.Exec(`
+		DROP TABLE IF EXISTS players;
+		DROP TABLE IF EXISTS player_types;
+		DROP TABLE IF EXISTS teams;
+		DROP TABLE IF EXISTS gameweeks;
+		DROP TABLE IF EXISTS fixtures;
+		DROP TABLE IF EXISTS imports;
+	`)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (p *DataStore) Dump() error {
@@ -86,26 +103,12 @@ func (p *DataStore) Dump() error {
 	return nil
 }
 
-func (p *DataStore) Setup(nukeDatabase bool) error {
+func (p *DataStore) Setup() error {
 	db, err := p.Connect()
 	if err != nil {
 		return err
 	}
 	defer p.Close()
-
-	if nukeDatabase {
-		_, err = db.Exec(`
-			DROP TABLE IF EXISTS players;
-			DROP TABLE IF EXISTS player_types;
-			DROP TABLE IF EXISTS teams;
-			DROP TABLE IF EXISTS gameweeks;
-			DROP TABLE IF EXISTS fixtures;
-			DROP TABLE IF EXISTS imports;
-		`)
-		if err != nil {
-			return err
-		}
-	}
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS imports (
 		gameweek_id INT PRIMARY KEY,
@@ -208,14 +211,10 @@ func (p *DataStore) Setup(nukeDatabase bool) error {
 }
 
 func (p *DataStore) StoreData(data *api.Data, dumpData bool) error {
-	var nuke bool
-
 	// ensures dump only contains data for specific gw
 	if dumpData {
-		nuke = true
+		p.Nuke()
 	}
-
-	p.Setup(nuke)
 
 	for _, playerType := range data.PlayerTypes {
 		if err := p.StorePlayerType(playerType); err != nil {
@@ -242,7 +241,8 @@ func (p *DataStore) StoreData(data *api.Data, dumpData bool) error {
 	}
 
 	for _, fixture := range data.Fixtures {
-		if fixture.Gameweek.ID != models.GameweekID(p.GameweekID) {
+		// ensures we see only fixtures for specific gameweek
+		if dumpData && (fixture.Gameweek.ID != models.GameweekID(p.GameweekID)) {
 			continue
 		}
 
@@ -445,6 +445,89 @@ func (p *DataStore) GetPlayer(playerID models.PlayerID) (models.Player, error) {
 
 	fmt.Printf("player: %+v", player)
 	return models.Player{}, nil
+}
+
+func (p *DataStore) PlayersForGameweek(gameweek int) ([]models.Player, error) {
+	db, err := p.Connect()
+	if err != nil {
+		return nil, err
+	}
+	defer p.Close()
+
+	rows, err := db.Query(fmt.Sprintf("SELECT id, gameweek_id, name, form, points_per_game, total_points, cost, raw_cost, team_id, type_id, minutes, goals, assists, conceded, clean_sheets, yellow_cards, red_cards, bonus, starts, average_starts, picked_percentage FROM `players` WHERE `gameweek_id` = %d", gameweek))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	players := make([]models.Player, 0)
+	for rows.Next() {
+		type player struct {
+			ID               int
+			GameweekID       int
+			Name             string
+			Form             float32
+			PointsPerGame    float32
+			TotalPoints      int
+			Cost             string
+			RawCost          float32
+			TeamID           int
+			TypeID           int
+			Minutes          int
+			Goals            int
+			Assists          int
+			Conceded         int
+			CleanSheets      int
+			RedCards         int
+			YellowCards      int
+			Bonus            int
+			Starts           int
+			AverageStarts    float32
+			PickedPercentage float32
+		}
+		var playerRow player
+		err := rows.Scan(
+			&playerRow.ID,
+			&playerRow.GameweekID,
+			&playerRow.Name,
+			&playerRow.Form,
+			&playerRow.PointsPerGame,
+			&playerRow.TotalPoints,
+			&playerRow.Cost,
+			&playerRow.RawCost,
+			&playerRow.TeamID,
+			&playerRow.TypeID,
+			&playerRow.Minutes,
+			&playerRow.Goals,
+			&playerRow.Assists,
+			&playerRow.Conceded,
+			&playerRow.CleanSheets,
+			&playerRow.RedCards,
+			&playerRow.YellowCards,
+			&playerRow.Bonus,
+			&playerRow.Starts,
+			&playerRow.AverageStarts,
+			&playerRow.PickedPercentage,
+		)
+		if err != nil {
+			return nil, err
+		}
+		players = append(players, models.Player{
+			ID:            models.PlayerID(playerRow.ID),
+			Name:          playerRow.Name,
+			Form:          playerRow.Form,
+			PointsPerGame: playerRow.PointsPerGame,
+			TotalPoints:   playerRow.TotalPoints,
+			Cost:          playerRow.Cost,
+			RawCost:       playerRow.RawCost,
+		})
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return players, nil
 }
 
 // getTableNames retrieves a list of table names from the SQLite database.
