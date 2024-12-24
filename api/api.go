@@ -516,11 +516,10 @@ func getJsonBody(endpoint string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// to circumvent max retries errors
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode == http.StatusTooManyRequests {
 		backoff(func() error {
 			resp, err = http.Get(endpoint)
-			if resp.StatusCode != http.StatusOK {
+			if resp.StatusCode == http.StatusTooManyRequests {
 				return fmt.Errorf("status was not ok (status: %d)", resp.StatusCode)
 			}
 			return nil
