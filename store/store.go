@@ -202,6 +202,25 @@ func (p *DataStore) Setup() error {
 		return err
 	}
 
+	_, err = db.Exec(`CREATE TABLE player_fixture (
+		fixture_id INT NOT NULL,
+		player_id INT NOT NULL,
+		minutes INT NOT NULL,
+		played BOOLEAN NOT NULL,
+		points INT NOT NULL,
+		goals_scored INT NOT NULL,
+		assists INT NOT NULL,
+		yellow_cards INT NOT NULL,
+		red_cards INT NOT NULL,
+		bonus INT NOT NULL,
+		was_home BOOLEAN NOT NULL,
+		PRIMARY KEY (fixture_id, player_id)
+	)`)
+
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -228,12 +247,6 @@ func (p *DataStore) StoreData(data *api.Data, dumpData bool) error {
 		}
 	}
 
-	for _, player := range data.Players {
-		if err := p.StorePlayer(player); err != nil {
-			return err
-		}
-	}
-
 	for _, gameweek := range data.Gameweeks {
 		if err := p.StoreGameweek(gameweek); err != nil {
 			return err
@@ -248,6 +261,17 @@ func (p *DataStore) StoreData(data *api.Data, dumpData bool) error {
 
 		if err := p.StoreFixture(*fixture); err != nil {
 			return err
+		}
+	}
+
+	for _, player := range data.Players {
+		if err := p.StorePlayer(player); err != nil {
+			return err
+		}
+		for _, fixture := range player.History {
+			if err := p.StorePlayerFixture(fixture); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -275,6 +299,52 @@ func (p *DataStore) StorePlayer(player models.Player) error {
 	`
 
 	_, err = db.Exec(query, player.ID, player.Name, player.Form, player.PointsPerGame, player.TotalPoints, player.Cost, player.RawCost, player.Team.ID, player.Type.ID, player.Stats.Minutes, player.Stats.Goals, player.Stats.Assists, player.Stats.Conceded, player.Stats.CleanSheets, player.Stats.YellowCards, player.Stats.RedCards, player.Stats.Bonus, player.Stats.Starts, player.Stats.AverageStarts, player.Stats.MatchesPlayed, player.Stats.ICTIndex, player.Stats.ICTIndexRank, player.MostCaptained, player.PickedPercentage)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (p *DataStore) StorePlayerFixture(fixture models.PlayerFixture) error {
+	db, err := p.Connect()
+	if err != nil {
+		return err
+	}
+	defer p.Close()
+
+	query := `
+		INSERT INTO player_fixture (
+			fixture_id, 
+			player_id, 
+			minutes, 
+			played, 
+			points, 
+			goals_scored, 
+			assists, 
+			yellow_cards, 
+			red_cards, 
+			bonus, 
+			was_home
+		) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+	`
+
+	_, err = db.Exec(
+		query,
+		fixture.FixtureID,
+		fixture.PlayerID,
+		fixture.Minutes,
+		fixture.Played,
+		fixture.Points,
+		fixture.GoalsScored,
+		fixture.Assists,
+		fixture.YellowCards,
+		fixture.RedCards,
+		fixture.Bonus,
+		fixture.WasHome,
+	)
 
 	if err != nil {
 		return err
