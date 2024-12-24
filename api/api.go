@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"better-fantasy/models"
+
+	"github.com/hashicorp/go-multierror"
 )
 
 const (
@@ -78,15 +80,20 @@ type apiStats struct {
 }
 
 type apiPlayerFixturesAndHistory struct {
-	// Fixtures []apiPlayerFixture `json:"fixtures"`
 	History []apiPlayerHistory `json:"history"`
 }
 
 type apiPlayerHistory struct {
-	ElementID   int `json:"element"`
-	FixtureID   int `json:"fixture"`
-	Minutes     int `json:"minutes"`
-	TotalPoints int `json:"total_points"`
+	ElementID   int  `json:"element"`
+	FixtureID   int  `json:"fixture"`
+	Minutes     int  `json:"minutes"`
+	TotalPoints int  `json:"total_points"`
+	GoalsScored int  `json:"goals_scored"`
+	Assists     int  `json:"assists"`
+	YellowCards int  `json:"yellow_cards"`
+	RedCards    int  `json:"red_cards"`
+	Bonus       int  `json:"bonus"`
+	WasHome     bool `json:"was_home"`
 }
 
 type apiFixture struct {
@@ -229,14 +236,14 @@ func FetchData() (*Data, error) {
 		panic(err)
 	}
 
-	var currentGameweekID models.GameweekID
+	// var currentGameweekID models.GameweekID
 
 	gameweeksByID := make(map[models.GameweekID]*models.Gameweek, 0)
 	for _, apiEvent := range statsResp.Events {
 		gameweekID := models.GameweekID(apiEvent.ID)
-		if apiEvent.IsCurrent {
-			currentGameweekID = gameweekID
-		}
+		// if apiEvent.IsCurrent {
+		// 	currentGameweekID = gameweekID
+		// }
 		gameweek := &models.Gameweek{
 			ID:              gameweekID,
 			Name:            apiEvent.Name,
@@ -279,94 +286,43 @@ func FetchData() (*Data, error) {
 		data.PlayerTypes = append(data.PlayerTypes, newType)
 	}
 
+	playerCount := len(statsResp.Elements)
+	playersChannel := make(chan models.Player, playerCount)
+	errorsChannel := make(chan error, playerCount)
+
 	teamPlayersByID := make(map[models.TeamID][]models.Player, 0)
 	allPlayers := make([]models.Player, 0)
+
 	for _, apiPlayer := range statsResp.Elements {
-		playerForm, err := strconv.ParseFloat(apiPlayer.Form, 32)
-		if err != nil {
-			return &Data{}, err
-		}
-
-		playerPointsPerGame, err := strconv.ParseFloat(apiPlayer.PointsPerGame, 32)
-		if err != nil {
-			return &Data{}, err
-		}
-
-		playerTeam, ok := teamsByID[models.TeamID(apiPlayer.TeamID)]
-		if !ok {
-			return &Data{}, fmt.Errorf("missing team ID '%d'", apiPlayer.TeamID)
-		}
-
-		playerType, ok := playerTypesByID[models.PlayerTypeID(apiPlayer.TypeID)]
-		if !ok {
-			return &Data{}, fmt.Errorf("missing player type ID '%d'", apiPlayer.TypeID)
-		}
-
-		ictIndex, err := strconv.ParseFloat(apiPlayer.ICTIndex, 32)
-		if err != nil {
-			return &Data{}, err
-		}
-
-		formattedCost := fmt.Sprintf("£%.1fm", float32(apiPlayer.Cost)/float32(10))
-
-		var chanceOfPlayingThisRound float32
-		if apiPlayer.ChanceOfPlayingThisRound == nil {
-			chanceOfPlayingThisRound = 1
-		} else {
-			chanceOfPlayingThisRound = float32(*apiPlayer.ChanceOfPlayingThisRound) / 100
-		}
-
-		var chanceOfPlayingNextRound float32
-		if apiPlayer.ChanceOfPlayingNextRound == nil {
-			chanceOfPlayingNextRound = 1
-		} else {
-			chanceOfPlayingNextRound = float32(*apiPlayer.ChanceOfPlayingNextRound) / 100
-		}
-
-		chanceOfPlaying := map[models.GameweekID]float32{
-			currentGameweekID:     chanceOfPlayingThisRound,
-			currentGameweekID + 1: chanceOfPlayingNextRound, // assumes next round is gameweek ID + 1
-		}
-
-		pickedPercentage, err := strconv.ParseFloat(apiPlayer.SelectedByPercent, 32)
-		if err != nil {
-			return &Data{}, err
-		}
-
-		newPlayer := models.Player{
-			ID:            models.PlayerID(apiPlayer.ID),
-			Name:          apiPlayer.Name,
-			Form:          float32(playerForm),
-			PointsPerGame: float32(playerPointsPerGame),
-			TotalPoints:   apiPlayer.TotalPoints,
-			Cost:          formattedCost,
-			RawCost:       float32(apiPlayer.Cost) / float32(10),
-			Team:          playerTeam,
-			Type:          playerType,
-			Stats: models.PlayerStats{
-				Minutes:       apiPlayer.Minutes,
-				Goals:         apiPlayer.Goals,
-				Assists:       apiPlayer.Assists,
-				Conceded:      apiPlayer.Conceded,
-				CleanSheets:   apiPlayer.CleanSheets,
-				YellowCards:   apiPlayer.YellowCards,
-				RedCards:      apiPlayer.RedCards,
-				Bonus:         apiPlayer.Bonus,
-				Starts:        apiPlayer.Starts,
-				AverageStarts: apiPlayer.StartsPerNinety,
-				ICTIndex:      float32(ictIndex),
-				ICTIndexRank:  apiPlayer.ICTIndexRank,
-			},
-			ChanceOfPlaying:  chanceOfPlaying,
-			PickedPercentage: float32(pickedPercentage),
-		}
-
-		teamPlayersByID[newPlayer.Team.ID] = append(
-			teamPlayersByID[models.TeamID(newPlayer.Team.ID)],
-			newPlayer,
-		)
-		allPlayers = append(allPlayers, newPlayer)
+		go func() {
+			newPlayer, err := newPlayer(apiPlayer, teamsByID, playerTypesByID)
+			if err != nil {
+				errorsChannel <- err
+				return
+			}
+			playersChannel <- newPlayer
+		}()
 	}
+
+	var errors error
+	for i := 0; i < playerCount; i++ {
+		select {
+		case player := <-playersChannel:
+			allPlayers = append(allPlayers, player)
+			teamPlayersByID[player.Team.ID] = append(
+				teamPlayersByID[models.TeamID(player.Team.ID)],
+				player,
+			)
+		case err := <-errorsChannel:
+			errors = multierror.Append(errors, err)
+		}
+	}
+	if errors != nil {
+		return &Data{}, fmt.Errorf("there was a problem building players: %w", errors)
+	}
+
+	close(playersChannel)
+	close(errorsChannel)
 
 	data.Players = allPlayers
 
@@ -418,6 +374,99 @@ func FetchData() (*Data, error) {
 	return data, nil
 }
 
+func newPlayer(
+	apiPlayer apiElement,
+	teamsByID map[models.TeamID]*models.Team,
+	playerTypesByID map[models.PlayerTypeID]models.PlayerType,
+) (models.Player, error) {
+	playerForm, err := strconv.ParseFloat(apiPlayer.Form, 32)
+	if err != nil {
+		return models.Player{}, err
+	}
+
+	playerPointsPerGame, err := strconv.ParseFloat(apiPlayer.PointsPerGame, 32)
+	if err != nil {
+		return models.Player{}, err
+	}
+
+	playerTeam, ok := teamsByID[models.TeamID(apiPlayer.TeamID)]
+	if !ok {
+		return models.Player{}, fmt.Errorf("missing team ID '%d'", apiPlayer.TeamID)
+	}
+
+	playerType, ok := playerTypesByID[models.PlayerTypeID(apiPlayer.TypeID)]
+	if !ok {
+		return models.Player{}, fmt.Errorf("missing player type ID '%d'", apiPlayer.TypeID)
+	}
+
+	ictIndex, err := strconv.ParseFloat(apiPlayer.ICTIndex, 32)
+	if err != nil {
+		return models.Player{}, err
+	}
+
+	formattedCost := fmt.Sprintf("£%.1fm", float32(apiPlayer.Cost)/float32(10))
+
+	// var chanceOfPlayingThisRound float32
+	// if apiPlayer.ChanceOfPlayingThisRound == nil {
+	// 	chanceOfPlayingThisRound = 1
+	// } else {
+	// 	chanceOfPlayingThisRound = float32(*apiPlayer.ChanceOfPlayingThisRound) / 100
+	// }
+
+	// var chanceOfPlayingNextRound float32
+	// if apiPlayer.ChanceOfPlayingNextRound == nil {
+	// 	chanceOfPlayingNextRound = 1
+	// } else {
+	// 	chanceOfPlayingNextRound = float32(*apiPlayer.ChanceOfPlayingNextRound) / 100
+	// }
+
+	// chanceOfPlaying := map[models.GameweekID]float32{
+	// 	currentGameweekID:     chanceOfPlayingThisRound,
+	// 	currentGameweekID + 1: chanceOfPlayingNextRound, // assumes next round is gameweek ID + 1
+	// }
+
+	pickedPercentage, err := strconv.ParseFloat(apiPlayer.SelectedByPercent, 32)
+	if err != nil {
+		return models.Player{}, err
+	}
+
+	newPlayer := models.Player{
+		ID:            models.PlayerID(apiPlayer.ID),
+		Name:          apiPlayer.Name,
+		Form:          float32(playerForm),
+		PointsPerGame: float32(playerPointsPerGame),
+		TotalPoints:   apiPlayer.TotalPoints,
+		Cost:          formattedCost,
+		RawCost:       float32(apiPlayer.Cost) / float32(10),
+		Team:          playerTeam,
+		Type:          playerType,
+		Stats: models.PlayerStats{
+			Minutes:       apiPlayer.Minutes,
+			Goals:         apiPlayer.Goals,
+			Assists:       apiPlayer.Assists,
+			Conceded:      apiPlayer.Conceded,
+			CleanSheets:   apiPlayer.CleanSheets,
+			YellowCards:   apiPlayer.YellowCards,
+			RedCards:      apiPlayer.RedCards,
+			Bonus:         apiPlayer.Bonus,
+			Starts:        apiPlayer.Starts,
+			AverageStarts: apiPlayer.StartsPerNinety,
+			ICTIndex:      float32(ictIndex),
+			ICTIndexRank:  apiPlayer.ICTIndexRank,
+		},
+		// ChanceOfPlaying:  chanceOfPlaying,
+		PickedPercentage: float32(pickedPercentage),
+	}
+
+	history, err := requestPlayerHistory(int(newPlayer.ID))
+	if err != nil {
+		return models.Player{}, err
+	}
+	newPlayer.History = history
+
+	return newPlayer, nil
+}
+
 func requestPlayerHistory(apiPlayerID int) (map[models.FixtureID]models.PlayerFixture, error) {
 	fixturesAndHistoryApiBody, err := getJsonBody(fmt.Sprintf("%s/%d", playerFixturesApi, apiPlayerID))
 	if err != nil {
@@ -430,21 +479,52 @@ func requestPlayerHistory(apiPlayerID int) (map[models.FixtureID]models.PlayerFi
 	fixturesToPlayerFixtures := make(map[models.FixtureID]models.PlayerFixture, 0)
 	for _, fixture := range fixturesAndHistory.History {
 		fixturesToPlayerFixtures[models.FixtureID(fixture.FixtureID)] = models.PlayerFixture{
-			FixtureID: models.FixtureID(fixture.FixtureID),
-			PlayerID:  models.PlayerID(fixture.ElementID),
-			Minutes:   fixture.Minutes,
-			Played:    fixture.Minutes > 0,
-			Points:    fixture.TotalPoints,
+			FixtureID:   models.FixtureID(fixture.FixtureID),
+			PlayerID:    models.PlayerID(fixture.ElementID),
+			Minutes:     fixture.Minutes,
+			Played:      fixture.Minutes > 0,
+			Points:      fixture.TotalPoints,
+			GoalsScored: fixture.GoalsScored,
+			Assists:     fixture.Assists,
+			YellowCards: fixture.YellowCards,
+			RedCards:    fixture.RedCards,
+			Bonus:       fixture.Bonus,
+			WasHome:     fixture.WasHome,
 		}
 	}
 
 	return fixturesToPlayerFixtures, nil
 }
 
+func backoff(f func() error, retries int, baseInterval time.Duration) error {
+	var err error
+	var fib1, fib2 int = 0, 1
+	for i := 0; i <= retries; i++ {
+		err = f()
+		if err == nil {
+			return nil
+		}
+		nextInterval := baseInterval * time.Duration(fib1)
+		fib1, fib2 = fib2, fib1+fib2
+		time.Sleep(nextInterval)
+	}
+	return err
+}
+
 func getJsonBody(endpoint string) ([]byte, error) {
 	resp, err := http.Get(endpoint)
 	if err != nil {
 		return nil, err
+	}
+	// to circumvent max retries errors
+	if resp.StatusCode != http.StatusOK {
+		backoff(func() error {
+			resp, err = http.Get(endpoint)
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("status was not ok (status: %d)", resp.StatusCode)
+			}
+			return nil
+		}, 10, time.Second*1)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

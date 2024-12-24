@@ -68,10 +68,26 @@ func (p *Player) PointsOverCost() float32 {
 	return float32(p.TotalPoints) / p.RawCost
 }
 
+// goals & assists
+func (p *Player) AttackingForm(weeks int) float32 {
+	return 0
+}
+
+// clean sheets
+func (p *Player) DefendingForm(weeks int) float32 {
+	return 0
+}
+
 type PlayerFixture struct {
-	FixtureID FixtureID
-	PlayerID  PlayerID
-	Minutes   int
-	Played    bool
-	Points    int
+	FixtureID   FixtureID
+	PlayerID    PlayerID
+	Minutes     int
+	Played      bool
+	Points      int
+	GoalsScored int
+	Assists     int
+	YellowCards int
+	RedCards    int
+	Bonus       int
+	WasHome     bool
 }
