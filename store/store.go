@@ -202,7 +202,7 @@ func (p *DataStore) Setup() error {
 		return err
 	}
 
-	_, err = db.Exec(`CREATE TABLE player_fixture (
+	_, err = db.Exec(`CREATE TABLE player_fixtures (
 		fixture_id INT NOT NULL,
 		player_id INT NOT NULL,
 		minutes INT NOT NULL,
@@ -315,7 +315,7 @@ func (p *DataStore) StorePlayerFixture(fixture models.PlayerFixture) error {
 	defer p.Close()
 
 	query := `
-		INSERT INTO player_fixture (
+		INSERT INTO player_fixtures (
 			fixture_id, 
 			player_id, 
 			minutes, 
@@ -517,21 +517,21 @@ func (p *DataStore) GetPlayer(playerID models.PlayerID) (models.Player, error) {
 	return models.Player{}, nil
 }
 
-func (p *DataStore) PlayersForGameweek(gameweek int) ([]models.Player, error) {
+func (p *DataStore) GetPlayers() (map[models.PlayerID]models.Player, error) {
 	db, err := p.Connect()
 	if err != nil {
 		return nil, err
 	}
 	defer p.Close()
 
-	rows, err := db.Query("SELECT id, name, form, points_per_game, total_points, cost, raw_cost, team_id, type_id, minutes, goals, assists, conceded, clean_sheets, yellow_cards, red_cards, bonus, starts, average_starts, picked_percentage FROM `players`")
+	playerRows, err := db.Query("SELECT id, name, form, points_per_game, total_points, cost, raw_cost, team_id, type_id, minutes, goals, assists, conceded, clean_sheets, yellow_cards, red_cards, bonus, starts, average_starts, picked_percentage FROM `players`")
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer playerRows.Close()
 
-	players := make([]models.Player, 0)
-	for rows.Next() {
+	players := make(map[models.PlayerID]models.Player, 0)
+	for playerRows.Next() {
 		type player struct {
 			ID               int
 			Name             string
@@ -555,7 +555,7 @@ func (p *DataStore) PlayersForGameweek(gameweek int) ([]models.Player, error) {
 			PickedPercentage float32
 		}
 		var playerRow player
-		err := rows.Scan(
+		err := playerRows.Scan(
 			&playerRow.ID,
 			&playerRow.Name,
 			&playerRow.Form,
@@ -580,7 +580,7 @@ func (p *DataStore) PlayersForGameweek(gameweek int) ([]models.Player, error) {
 		if err != nil {
 			return nil, err
 		}
-		players = append(players, models.Player{
+		players[models.PlayerID(playerRow.ID)] = models.Player{
 			ID:            models.PlayerID(playerRow.ID),
 			Name:          playerRow.Name,
 			Form:          playerRow.Form,
@@ -591,11 +591,40 @@ func (p *DataStore) PlayersForGameweek(gameweek int) ([]models.Player, error) {
 			Stats: models.PlayerStats{
 				Bonus: playerRow.Bonus,
 			},
-		})
+		}
 	}
 
-	if err = rows.Err(); err != nil {
+	if err = playerRows.Err(); err != nil {
 		return nil, err
+	}
+
+	playerFixtureRows, err := db.Query("SELECT fixture_id, player_id FROM `player_fixtures`")
+	if err != nil {
+		return nil, err
+	}
+	defer playerFixtureRows.Close()
+
+	for playerFixtureRows.Next() {
+		type playerFixture struct {
+			FixtureID int
+			PlayerID  int
+		}
+		var playerFixtureRow playerFixture
+		playerFixtureRows.Scan(
+			&playerFixtureRow.FixtureID,
+			&playerFixtureRow.PlayerID,
+		)
+		if _, ok := players[models.PlayerID(playerFixtureRow.PlayerID)]; ok {
+			player := players[models.PlayerID(playerFixtureRow.PlayerID)]
+			if player.History == nil {
+				player.History = make(map[models.FixtureID]models.PlayerFixture, 0)
+			}
+			player.History[models.FixtureID(playerFixtureRow.FixtureID)] = models.PlayerFixture{
+				FixtureID: models.FixtureID(playerFixtureRow.FixtureID),
+				PlayerID:  models.PlayerID(playerFixtureRow.PlayerID),
+			}
+			players[models.PlayerID(playerFixtureRow.PlayerID)] = player
+		}
 	}
 
 	return players, nil

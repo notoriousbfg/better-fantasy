@@ -27,17 +27,21 @@ func NewInsights(store *store.DataStore) *Insights {
 // - players with easy upcoming fixtures
 // - players with the most bonus
 func (i *Insights) Analyse() error {
-	playersForGameweek, err := i.Store.PlayersForGameweek(i.Gameweek)
+	playersForGameweek, err := i.Store.GetPlayers()
 	if err != nil {
 		return err
 	}
-	bestFormValuePlayers := sortPlayersByFormValueDesc(playersForGameweek)[:10]
+	playersSlice := make([]models.Player, 0)
+	for _, player := range playersForGameweek {
+		playersSlice = append(playersSlice, player)
+	}
+	bestFormValuePlayers := sortPlayersByFormValueDesc(playersSlice)[:10]
 	printPlayerCostsList("The best value players (form):", bestFormValuePlayers)
 	fmt.Println()
-	bestPointsValuePlayers := sortPlayersByPointsValueDesc(playersForGameweek)[:10]
+	bestPointsValuePlayers := sortPlayersByPointsValueDesc(playersSlice)[:10]
 	printPlayerCostsList("The best value players (total):", bestPointsValuePlayers)
 	fmt.Println()
-	highestBonus := sortPlayersByBonus(playersForGameweek)[:10]
+	highestBonus := sortPlayersByBonus(playersSlice)[:10]
 	printPlayerBonusList("Players with the highest numbers of bonus points:", highestBonus)
 	return nil
 }

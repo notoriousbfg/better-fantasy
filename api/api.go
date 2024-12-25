@@ -523,7 +523,7 @@ func getJsonBody(endpoint string) ([]byte, error) {
 				return fmt.Errorf("status was not ok (status: %d)", resp.StatusCode)
 			}
 			return nil
-		}, 10, time.Second*1)
+		}, 15, time.Second*1)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
