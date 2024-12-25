@@ -581,9 +581,12 @@ func (p *DataStore) GetPlayers() (map[models.PlayerID]models.Player, error) {
 			return nil, err
 		}
 		players[models.PlayerID(playerRow.ID)] = models.Player{
-			ID:            models.PlayerID(playerRow.ID),
-			Name:          playerRow.Name,
-			Form:          playerRow.Form,
+			ID:   models.PlayerID(playerRow.ID),
+			Name: playerRow.Name,
+			Form: playerRow.Form,
+			Type: models.PlayerType{
+				ID: models.PlayerTypeID(playerRow.TypeID),
+			},
 			PointsPerGame: playerRow.PointsPerGame,
 			TotalPoints:   playerRow.TotalPoints,
 			Cost:          playerRow.Cost,
@@ -598,7 +601,7 @@ func (p *DataStore) GetPlayers() (map[models.PlayerID]models.Player, error) {
 		return nil, err
 	}
 
-	playerFixtureRows, err := db.Query("SELECT fixture_id, player_id FROM `player_fixtures`")
+	playerFixtureRows, err := db.Query("SELECT fixture_id, player_id, minutes, goals_scored, assists FROM `player_fixtures`")
 	if err != nil {
 		return nil, err
 	}
@@ -606,22 +609,30 @@ func (p *DataStore) GetPlayers() (map[models.PlayerID]models.Player, error) {
 
 	for playerFixtureRows.Next() {
 		type playerFixture struct {
-			FixtureID int
-			PlayerID  int
+			FixtureID   int
+			PlayerID    int
+			Minutes     int
+			GoalsScored int
+			Assists     int
 		}
 		var playerFixtureRow playerFixture
 		playerFixtureRows.Scan(
 			&playerFixtureRow.FixtureID,
 			&playerFixtureRow.PlayerID,
+			&playerFixtureRow.Minutes,
+			&playerFixtureRow.GoalsScored,
+			&playerFixtureRow.Assists,
 		)
-		if _, ok := players[models.PlayerID(playerFixtureRow.PlayerID)]; ok {
-			player := players[models.PlayerID(playerFixtureRow.PlayerID)]
+		if player, ok := players[models.PlayerID(playerFixtureRow.PlayerID)]; ok {
 			if player.History == nil {
 				player.History = make(map[models.FixtureID]models.PlayerFixture, 0)
 			}
 			player.History[models.FixtureID(playerFixtureRow.FixtureID)] = models.PlayerFixture{
-				FixtureID: models.FixtureID(playerFixtureRow.FixtureID),
-				PlayerID:  models.PlayerID(playerFixtureRow.PlayerID),
+				FixtureID:   models.FixtureID(playerFixtureRow.FixtureID),
+				PlayerID:    models.PlayerID(playerFixtureRow.PlayerID),
+				Minutes:     playerFixtureRow.Minutes,
+				GoalsScored: playerFixtureRow.GoalsScored,
+				Assists:     playerFixtureRow.Assists,
 			}
 			players[models.PlayerID(playerFixtureRow.PlayerID)] = player
 		}

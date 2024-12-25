@@ -1,6 +1,17 @@
 package models
 
+import (
+	"sort"
+)
+
 type PlayerTypeID int
+
+const (
+	PTGoalkeeper PlayerTypeID = iota + 1
+	PTDefender
+	PTMidfielder
+	PTForward
+)
 
 type PlayerType struct {
 	ID               PlayerTypeID
@@ -70,7 +81,47 @@ func (p *Player) PointsOverCost() float32 {
 
 // goals & assists
 func (p *Player) AttackingForm(weeks int) float32 {
-	return 0
+	if weeks == 0 || len(p.History) == 0 {
+		return 0
+	}
+	history := make([]PlayerFixture, 0)
+	for _, fixture := range p.History {
+		history = append(history, fixture)
+	}
+	sort.Slice(history, func(i, j int) bool {
+		return history[i].FixtureID > history[j].FixtureID
+	})
+	var lastPlayed []PlayerFixture
+	if weeks > len(p.History) {
+		lastPlayed = history
+	} else {
+		lastPlayed = history[len(history)-weeks:]
+	}
+	goalPoints := 0
+	assistPoints := 0
+	switch p.Type.ID {
+	case PTGoalkeeper:
+		for _, fixture := range lastPlayed {
+			goalPoints += fixture.GoalsScored * 10
+			assistPoints += fixture.Assists * 3
+		}
+	case PTDefender:
+		for _, fixture := range lastPlayed {
+			goalPoints += fixture.GoalsScored * 6
+			assistPoints += fixture.Assists * 3
+		}
+	case PTMidfielder:
+		for _, fixture := range lastPlayed {
+			goalPoints += fixture.GoalsScored * 5
+			assistPoints += fixture.Assists * 3
+		}
+	case PTForward:
+		for _, fixture := range lastPlayed {
+			goalPoints += fixture.GoalsScored * 4
+			assistPoints += fixture.Assists * 3
+		}
+	}
+	return (float32(goalPoints) + float32(assistPoints)) / float32(weeks)
 }
 
 // clean sheets

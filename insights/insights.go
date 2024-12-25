@@ -35,14 +35,47 @@ func (i *Insights) Analyse() error {
 	for _, player := range playersForGameweek {
 		playersSlice = append(playersSlice, player)
 	}
-	bestFormValuePlayers := sortPlayersByFormValueDesc(playersSlice)[:10]
-	printPlayerCostsList("The best value players (form):", bestFormValuePlayers)
+	// bestFormValuePlayers := sortPlayersByFormValueDesc(playersSlice)[:10]
+	// printPlayerCostsList("The best value players (form):", bestFormValuePlayers)
+	// fmt.Println()
+	// bestPointsValuePlayers := sortPlayersByPointsValueDesc(playersSlice)[:10]
+	// printPlayerCostsList("The best value players (total):", bestPointsValuePlayers)
+	// fmt.Println()
+	// highestBonus := sortPlayersByBonus(playersSlice)[:10]
+	// printPlayerBonusList("Players with the highest numbers of bonus points:", highestBonus)
+	highestAttackingFormPlayersFourWeeks := sortPlayersByAttackingForm(playersSlice, 4)[:10]
+	list := printer.List{
+		Title: "The most attacking players (form over 4 weeks):",
+		Items: make([]printer.ListItem, 0),
+	}
+	for _, player := range highestAttackingFormPlayersFourWeeks {
+		list.Items = append(list.Items, printer.ListItem{
+			Format: "%s (%s) (%.2f)",
+			Values: []interface{}{
+				player.Name,
+				player.Cost,
+				player.AttackingForm(4),
+			},
+		})
+	}
+	printer.PrintList(list)
 	fmt.Println()
-	bestPointsValuePlayers := sortPlayersByPointsValueDesc(playersSlice)[:10]
-	printPlayerCostsList("The best value players (total):", bestPointsValuePlayers)
-	fmt.Println()
-	highestBonus := sortPlayersByBonus(playersSlice)[:10]
-	printPlayerBonusList("Players with the highest numbers of bonus points:", highestBonus)
+	highestAttackingFormPlayersTwoWeeks := sortPlayersByAttackingForm(playersSlice, 2)[:10]
+	list = printer.List{
+		Title: "Attacking players on the rise (form over 2 weeks):",
+		Items: make([]printer.ListItem, 0),
+	}
+	for _, player := range highestAttackingFormPlayersTwoWeeks {
+		list.Items = append(list.Items, printer.ListItem{
+			Format: "%s (%s) (%.2f)",
+			Values: []interface{}{
+				player.Name,
+				player.Cost,
+				player.AttackingForm(2),
+			},
+		})
+	}
+	printer.PrintList(list)
 	return nil
 }
 
@@ -73,6 +106,15 @@ func sortPlayersByBonus(players []models.Player) []models.Player {
 	return tmp
 }
 
+func sortPlayersByAttackingForm(players []models.Player, weeks int) []models.Player {
+	tmp := make([]models.Player, len(players))
+	copy(tmp, players)
+	sort.Slice(tmp, func(i, j int) bool {
+		return tmp[i].AttackingForm(weeks) > tmp[j].AttackingForm(weeks)
+	})
+	return tmp
+}
+
 func printPlayerCostsList(title string, players []models.Player) {
 	list := printer.List{
 		Title: title,
@@ -80,10 +122,11 @@ func printPlayerCostsList(title string, players []models.Player) {
 	}
 	for _, player := range players {
 		list.Items = append(list.Items, printer.ListItem{
-			Format: "%s (%s)",
+			Format: "%s (%s) (%.2f)",
 			Values: []interface{}{
 				player.Name,
 				player.Cost,
+				player.AttackingForm(4),
 			},
 		})
 	}

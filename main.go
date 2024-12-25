@@ -5,6 +5,7 @@ import (
 	"better-fantasy/insights"
 	"better-fantasy/store"
 	"flag"
+	"fmt"
 )
 
 func main() {
@@ -19,6 +20,7 @@ func main() {
 	}
 
 	if !hasImported {
+		fmt.Println("This may take several minutes...")
 		data, err := api.FetchData()
 		if err != nil {
 			panic(err)
