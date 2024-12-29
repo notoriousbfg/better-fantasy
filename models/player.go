@@ -80,6 +80,55 @@ func (p *Player) PointsOverCost() float32 {
 }
 
 // goals & assists
+func (p *Player) AttackingPoints() float32 {
+	if len(p.History) == 0 {
+		return 0
+	}
+	history := make([]PlayerFixture, 0)
+	for _, fixture := range p.History {
+		history = append(history, fixture)
+	}
+	goalPoints := 0
+	assistPoints := 0
+	switch p.Type.ID {
+	case PTGoalkeeper:
+		for _, fixture := range history {
+			goalPoints += fixture.GoalsScored * 10
+			assistPoints += fixture.Assists * 3
+		}
+	case PTDefender:
+		for _, fixture := range history {
+			goalPoints += fixture.GoalsScored * 6
+			assistPoints += fixture.Assists * 3
+		}
+	case PTMidfielder:
+		for _, fixture := range history {
+			goalPoints += fixture.GoalsScored * 5
+			assistPoints += fixture.Assists * 3
+		}
+	case PTForward:
+		for _, fixture := range history {
+			goalPoints += fixture.GoalsScored * 4
+			assistPoints += fixture.Assists * 3
+		}
+	}
+	return float32(goalPoints) + float32(assistPoints)
+}
+
+func (p *Player) CleanSheets() float32 {
+	if len(p.History) == 0 {
+		return 0
+	}
+	cleanSheetPoints := 0
+	for _, fixture := range p.History {
+		if fixture.CleanSheet {
+			cleanSheetPoints++
+		}
+	}
+	return float32(cleanSheetPoints)
+}
+
+// goals & assists
 func (p *Player) AttackingForm(weeks int) float32 {
 	if weeks == 0 || len(p.History) == 0 {
 		return 0
@@ -140,5 +189,6 @@ type PlayerFixture struct {
 	YellowCards int
 	RedCards    int
 	Bonus       int
+	CleanSheet  bool
 	WasHome     bool
 }

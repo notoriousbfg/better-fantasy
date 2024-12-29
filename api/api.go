@@ -17,6 +17,7 @@ const (
 	fixturesApi       = "https://fantasy.premierleague.com/api/fixtures/"
 	statsApi          = "https://fantasy.premierleague.com/api/bootstrap-static/"
 	playerFixturesApi = "https://fantasy.premierleague.com/api/element-summary/"
+	picksApi          = "https://fantasy.premierleague.com/api/entry/%d/event/%d/picks/"
 )
 
 type apiTeam struct {
@@ -93,6 +94,7 @@ type apiPlayerHistory struct {
 	YellowCards int  `json:"yellow_cards"`
 	RedCards    int  `json:"red_cards"`
 	Bonus       int  `json:"bonus"`
+	CleanSheets int  `json:"clean_sheets"`
 	WasHome     bool `json:"was_home"`
 }
 
@@ -113,8 +115,9 @@ type apiPicks struct {
 }
 
 type apiPick struct {
-	Element   int  `json:"element"`
-	IsCaptain bool `json:"is_captain"`
+	Element       int  `json:"element"`
+	IsCaptain     bool `json:"is_captain"`
+	IsViceCaptain bool `json:"is_vice_captain"`
 }
 
 type apiEntryHistory struct {
@@ -122,109 +125,115 @@ type apiEntryHistory struct {
 }
 
 type Data struct {
-	PlayerTypes []models.PlayerType
-	Gameweeks   []models.Gameweek
-	Fixtures    []*models.Fixture
-	Teams       []*models.Team
-	Players     []models.Player
+	PlayerTypes  []models.PlayerType
+	Gameweeks    []models.Gameweek
+	Fixtures     []*models.Fixture
+	Teams        []*models.Team
+	Players      []models.Player
+	ManagerPicks []models.ManagerPick
 }
 
-func (d *Data) FixturesByGameWeek(gameweek int) []models.Fixture {
-	fixtures := make([]models.Fixture, 0)
-	for _, fixture := range d.Fixtures {
-		if models.GameweekID(gameweek) == fixture.Gameweek.ID {
-			fixtures = append(fixtures, *fixture)
-		}
-	}
-	return fixtures
+type FetchOptions struct {
+	ManagerID int
+	Gameweek  int
 }
 
-func (d *Data) Gameweek(gw int) *models.Gameweek {
-	for _, gameweek := range d.Gameweeks {
-		if gameweek.ID == models.GameweekID(gw) {
-			return &gameweek
-		}
-	}
-	return nil
-}
+// func (d *Data) FixturesByGameWeek(gameweek int) []models.Fixture {
+// 	fixtures := make([]models.Fixture, 0)
+// 	for _, fixture := range d.Fixtures {
+// 		if models.GameweekID(gameweek) == fixture.Gameweek.ID {
+// 			fixtures = append(fixtures, *fixture)
+// 		}
+// 	}
+// 	return fixtures
+// }
 
-func (d *Data) CurrentGameweek() *models.Gameweek {
-	for _, gameweek := range d.Gameweeks {
-		if gameweek.IsCurrent {
-			return &gameweek
-		}
-	}
-	return nil
-}
+// func (d *Data) Gameweek(gw int) *models.Gameweek {
+// 	for _, gameweek := range d.Gameweeks {
+// 		if gameweek.ID == models.GameweekID(gw) {
+// 			return &gameweek
+// 		}
+// 	}
+// 	return nil
+// }
 
-func (d *Data) PlayerType(pt string) *models.PlayerType {
-	for _, playerType := range d.PlayerTypes {
-		if playerType.Name == pt {
-			return &playerType
-		}
-	}
-	return nil
-}
+// func (d *Data) CurrentGameweek() *models.Gameweek {
+// 	for _, gameweek := range d.Gameweeks {
+// 		if gameweek.IsCurrent {
+// 			return &gameweek
+// 		}
+// 	}
+// 	return nil
+// }
 
-func (d *Data) GameweekPlayers(gameweek int) []models.StartingPlayer {
-	gameweekPlayers := make([]models.StartingPlayer, 0)
-	for _, fixture := range d.FixturesByGameWeek(gameweek) {
-		for _, player := range fixture.HomeTeam.Players {
-			gameweekPlayers = append(gameweekPlayers, models.StartingPlayer{
-				Player:       player,
-				Fixture:      fixture,
-				OpposingTeam: *fixture.AwayTeam,
-			})
-		}
-		for _, player := range fixture.AwayTeam.Players {
-			gameweekPlayers = append(gameweekPlayers, models.StartingPlayer{
-				Player:       player,
-				Fixture:      fixture,
-				OpposingTeam: *fixture.HomeTeam,
-			})
-		}
-	}
-	return gameweekPlayers
-}
+// func (d *Data) PlayerType(pt string) *models.PlayerType {
+// 	for _, playerType := range d.PlayerTypes {
+// 		if playerType.Name == pt {
+// 			return &playerType
+// 		}
+// 	}
+// 	return nil
+// }
 
-func (d *Data) GameweekPlayerSet(gameweek models.GameweekID) map[models.PlayerID]models.StartingPlayer {
-	playerSet := make(map[models.PlayerID]models.StartingPlayer, 0)
-	for _, player := range d.GameweekPlayers(int(gameweek)) {
-		playerSet[player.Player.ID] = player
-	}
-	return playerSet
-}
+// func (d *Data) GameweekPlayers(gameweek int) []models.StartingPlayer {
+// 	gameweekPlayers := make([]models.StartingPlayer, 0)
+// 	for _, fixture := range d.FixturesByGameWeek(gameweek) {
+// 		for _, player := range fixture.HomeTeam.Players {
+// 			gameweekPlayers = append(gameweekPlayers, models.StartingPlayer{
+// 				Player:       player,
+// 				Fixture:      fixture,
+// 				OpposingTeam: *fixture.AwayTeam,
+// 			})
+// 		}
+// 		for _, player := range fixture.AwayTeam.Players {
+// 			gameweekPlayers = append(gameweekPlayers, models.StartingPlayer{
+// 				Player:       player,
+// 				Fixture:      fixture,
+// 				OpposingTeam: *fixture.HomeTeam,
+// 			})
+// 		}
+// 	}
+// 	return gameweekPlayers
+// }
 
-func (d *Data) RequestManagerPicks(managerID int) models.TeamConfig {
-	endpoint := fmt.Sprintf("https://fantasy.premierleague.com/api/entry/%d/event/%d/picks/", managerID, d.CurrentGameweek().ID)
+// func (d *Data) GameweekPlayerSet(gameweek models.GameweekID) map[models.PlayerID]models.StartingPlayer {
+// 	playerSet := make(map[models.PlayerID]models.StartingPlayer, 0)
+// 	for _, player := range d.GameweekPlayers(int(gameweek)) {
+// 		playerSet[player.Player.ID] = player
+// 	}
+// 	return playerSet
+// }
 
-	teamBody, err := getJsonBody(endpoint)
-	if err != nil {
-		panic(err)
-	}
+// func (d *Data) RequestManagerPicks(managerID int) models.TeamConfig {
+// 	endpoint := fmt.Sprintf("https://fantasy.premierleague.com/api/entry/%d/event/%d/picks/", managerID, d.CurrentGameweek().ID)
 
-	var apiPicks apiPicks
-	if err := json.Unmarshal(teamBody, &apiPicks); err != nil {
-		panic(err)
-	}
+// 	teamBody, err := getJsonBody(endpoint)
+// 	if err != nil {
+// 		panic(err)
+// 	}
 
-	gameweekPlayerSet := d.GameweekPlayerSet(d.CurrentGameweek().ID)
+// 	var apiPicks apiPicks
+// 	if err := json.Unmarshal(teamBody, &apiPicks); err != nil {
+// 		panic(err)
+// 	}
 
-	players := make([]models.StartingPlayer, 0)
-	for _, pick := range apiPicks.Picks {
-		thisPlayer, ok := gameweekPlayerSet[models.PlayerID(pick.Element)]
-		if ok {
-			players = append(players, thisPlayer)
-		}
-	}
+// 	gameweekPlayerSet := d.GameweekPlayerSet(d.CurrentGameweek().ID)
 
-	return models.TeamConfig{
-		Players:   players,
-		BankValue: apiPicks.EntryHistory.Bank,
-	}
-}
+// 	players := make([]models.StartingPlayer, 0)
+// 	for _, pick := range apiPicks.Picks {
+// 		thisPlayer, ok := gameweekPlayerSet[models.PlayerID(pick.Element)]
+// 		if ok {
+// 			players = append(players, thisPlayer)
+// 		}
+// 	}
 
-func FetchData() (*Data, error) {
+// 	return models.TeamConfig{
+// 		Players:   players,
+// 		BankValue: apiPicks.EntryHistory.Bank,
+// 	}
+// }
+
+func FetchData(options FetchOptions) (*Data, error) {
 	data := &Data{}
 
 	statsApiBody, err := getJsonBody(statsApi)
@@ -236,14 +245,14 @@ func FetchData() (*Data, error) {
 		panic(err)
 	}
 
-	// var currentGameweekID models.GameweekID
+	var currentGameweekID models.GameweekID
 
 	gameweeksByID := make(map[models.GameweekID]*models.Gameweek, 0)
 	for _, apiEvent := range statsResp.Events {
 		gameweekID := models.GameweekID(apiEvent.ID)
-		// if apiEvent.IsCurrent {
-		// 	currentGameweekID = gameweekID
-		// }
+		if apiEvent.IsCurrent {
+			currentGameweekID = gameweekID
+		}
 		gameweek := &models.Gameweek{
 			ID:              gameweekID,
 			Name:            apiEvent.Name,
@@ -371,6 +380,30 @@ func FetchData() (*Data, error) {
 	}
 	data.Fixtures = fixtures
 
+	if options.ManagerID > 0 {
+		endpoint := fmt.Sprintf(picksApi, options.ManagerID, currentGameweekID)
+
+		teamBody, err := getJsonBody(endpoint)
+		if err != nil {
+			return nil, err
+		}
+
+		var apiPicks apiPicks
+		if err := json.Unmarshal(teamBody, &apiPicks); err != nil {
+			return nil, err
+		}
+
+		for _, pick := range apiPicks.Picks {
+			data.ManagerPicks = append(data.ManagerPicks, models.ManagerPick{
+				ManagerID:     options.ManagerID,
+				PlayerID:      pick.Element,
+				GameweekID:    currentGameweekID,
+				IsCaptain:     pick.IsCaptain,
+				IsViceCaptain: pick.IsViceCaptain,
+			})
+		}
+	}
+
 	return data, nil
 }
 
@@ -489,6 +522,7 @@ func requestPlayerHistory(apiPlayerID int) (map[models.FixtureID]models.PlayerFi
 			YellowCards: fixture.YellowCards,
 			RedCards:    fixture.RedCards,
 			Bonus:       fixture.Bonus,
+			CleanSheet:  fixture.CleanSheets > 0,
 			WasHome:     fixture.WasHome,
 		}
 	}

@@ -9,6 +9,7 @@ import (
 )
 
 func main() {
+	managerID := flag.Int("manager", 0, "manager id")
 	dump := flag.Bool("dump", false, "for saving data to file")
 	flag.Parse()
 
@@ -21,7 +22,9 @@ func main() {
 
 	if !hasImported {
 		fmt.Println("This may take several minutes...")
-		data, err := api.FetchData()
+		data, err := api.FetchData(api.FetchOptions{
+			ManagerID: *managerID,
+		})
 		if err != nil {
 			panic(err)
 		}

@@ -111,7 +111,6 @@ func (p *DataStore) Setup() error {
 		gameweek_id INT PRIMARY KEY,
 		imported BOOLEAN NOT NULL
 	)`)
-
 	if err != nil {
 		return err
 	}
@@ -125,7 +124,6 @@ func (p *DataStore) Setup() error {
 		team_min_play_count INTEGER,
 		team_max_play_count INTEGER
 	)`)
-
 	if err != nil {
 		return err
 	}
@@ -156,7 +154,6 @@ func (p *DataStore) Setup() error {
 		most_captained BOOLEAN,
 		picked_percentage REAL
 	)`)
-
 	if err != nil {
 		return err
 	}
@@ -166,7 +163,6 @@ func (p *DataStore) Setup() error {
 		name VARCHAR,
 		short_name VARCHAR
 	)`)
-
 	if err != nil {
 		return err
 	}
@@ -180,7 +176,6 @@ func (p *DataStore) Setup() error {
 		finished BOOLEAN NOT NULL,
 		most_captained_id INT
 	)`)
-
 	if err != nil {
 		return err
 	}
@@ -197,12 +192,11 @@ func (p *DataStore) Setup() error {
 		CONSTRAINT fk_home_team FOREIGN KEY (home_team_id) REFERENCES teams(id),
 		CONSTRAINT fk_away_team FOREIGN KEY (away_team_id) REFERENCES teams(id)
 	)`)
-
 	if err != nil {
 		return err
 	}
 
-	_, err = db.Exec(`CREATE TABLE player_fixtures (
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS player_fixtures (
 		fixture_id INT NOT NULL,
 		player_id INT NOT NULL,
 		minutes INT NOT NULL,
@@ -213,10 +207,21 @@ func (p *DataStore) Setup() error {
 		yellow_cards INT NOT NULL,
 		red_cards INT NOT NULL,
 		bonus INT NOT NULL,
+		clean_sheet BOOLEAN NOT NULL,
 		was_home BOOLEAN NOT NULL,
 		PRIMARY KEY (fixture_id, player_id)
 	)`)
+	if err != nil {
+		return err
+	}
 
+	_, err = db.Exec(`CREATE table IF NOT EXISTS manager_picks (
+		manager_id INT NOT NULL,
+		gameweek_id INT NOT NULL,
+		player_id INT NOT NULL,
+		is_captain BOOLEAN NOT NULL,
+		is_vice_captain BOOLEAN NOT NULL
+	)`)
 	if err != nil {
 		return err
 	}
@@ -225,8 +230,24 @@ func (p *DataStore) Setup() error {
 }
 
 func (p *DataStore) CurrentGameweek() int {
-	// TODO
-	return 1
+	db, err := p.Connect()
+	if err != nil {
+		return 0
+	}
+	defer p.Close()
+
+	row := db.QueryRow("SELECT `id` FROM `gameweeks` WHERE `is_current` = 1")
+
+	var gameweek models.Gameweek
+	err = row.Scan(
+		&gameweek.ID,
+	)
+
+	if err != nil {
+		return 0
+	}
+
+	return int(gameweek.ID)
 }
 
 func (p *DataStore) StoreData(data *api.Data, dumpData bool) error {
@@ -275,6 +296,12 @@ func (p *DataStore) StoreData(data *api.Data, dumpData bool) error {
 		}
 	}
 
+	for _, pick := range data.ManagerPicks {
+		if err := p.StorePick(pick); err != nil {
+			return err
+		}
+	}
+
 	if dumpData {
 		if err := p.Dump(); err != nil {
 			return err
@@ -315,7 +342,7 @@ func (p *DataStore) StorePlayerFixture(fixture models.PlayerFixture) error {
 	defer p.Close()
 
 	query := `
-		INSERT INTO player_fixtures (
+		INSERT OR IGNORE INTO player_fixtures (
 			fixture_id, 
 			player_id, 
 			minutes, 
@@ -326,9 +353,10 @@ func (p *DataStore) StorePlayerFixture(fixture models.PlayerFixture) error {
 			yellow_cards, 
 			red_cards, 
 			bonus, 
+			clean_sheet,
 			was_home
 		) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 	`
 
 	_, err = db.Exec(
@@ -343,6 +371,7 @@ func (p *DataStore) StorePlayerFixture(fixture models.PlayerFixture) error {
 		fixture.YellowCards,
 		fixture.RedCards,
 		fixture.Bonus,
+		fixture.CleanSheet,
 		fixture.WasHome,
 	)
 
@@ -443,6 +472,31 @@ func (p *DataStore) StoreFixture(fixture models.Fixture) error {
 	return nil
 }
 
+func (p *DataStore) StorePick(pick models.ManagerPick) error {
+	db, err := p.Connect()
+	if err != nil {
+		return err
+	}
+	defer p.Close()
+
+	query := `
+		INSERT OR IGNORE INTO manager_picks (
+			manager_id,
+			gameweek_id,
+			player_id,
+			is_captain,
+			is_vice_captain
+		) VALUES (?, ?, ?, ?, ?)`
+
+	_, err = db.Exec(query, pick.ManagerID, pick.GameweekID, pick.PlayerID, pick.IsCaptain, pick.IsViceCaptain)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (p *DataStore) HasImported() (bool, error) {
 	db, err := p.Connect()
 	if err != nil {
@@ -513,8 +567,7 @@ func (p *DataStore) GetPlayer(playerID models.PlayerID) (models.Player, error) {
 		return models.Player{}, err
 	}
 
-	fmt.Printf("player: %+v", player)
-	return models.Player{}, nil
+	return player, nil
 }
 
 func (p *DataStore) GetPlayers() (map[models.PlayerID]models.Player, error) {
@@ -601,7 +654,7 @@ func (p *DataStore) GetPlayers() (map[models.PlayerID]models.Player, error) {
 		return nil, err
 	}
 
-	playerFixtureRows, err := db.Query("SELECT fixture_id, player_id, minutes, goals_scored, assists FROM `player_fixtures`")
+	playerFixtureRows, err := db.Query("SELECT fixture_id, player_id, minutes, goals_scored, assists, clean_sheet FROM `player_fixtures`")
 	if err != nil {
 		return nil, err
 	}
@@ -614,6 +667,7 @@ func (p *DataStore) GetPlayers() (map[models.PlayerID]models.Player, error) {
 			Minutes     int
 			GoalsScored int
 			Assists     int
+			CleanSheet  bool
 		}
 		var playerFixtureRow playerFixture
 		playerFixtureRows.Scan(
@@ -622,6 +676,7 @@ func (p *DataStore) GetPlayers() (map[models.PlayerID]models.Player, error) {
 			&playerFixtureRow.Minutes,
 			&playerFixtureRow.GoalsScored,
 			&playerFixtureRow.Assists,
+			&playerFixtureRow.CleanSheet,
 		)
 		if player, ok := players[models.PlayerID(playerFixtureRow.PlayerID)]; ok {
 			if player.History == nil {
@@ -633,6 +688,7 @@ func (p *DataStore) GetPlayers() (map[models.PlayerID]models.Player, error) {
 				Minutes:     playerFixtureRow.Minutes,
 				GoalsScored: playerFixtureRow.GoalsScored,
 				Assists:     playerFixtureRow.Assists,
+				CleanSheet:  playerFixtureRow.CleanSheet,
 			}
 			players[models.PlayerID(playerFixtureRow.PlayerID)] = player
 		}
